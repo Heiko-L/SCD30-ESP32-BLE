@@ -7,26 +7,14 @@
 
 // *** declarations *** //
 
-enum measurement_type
-{
-  low_power,
-  high_performance,
-  idle_single_shot,
-  power_cycled_single_shot
-};
-
 // Callback functions
 void OnForcedRecalibration(std::string value);
 void OnIntervalChange(std::string value);
 void OnAltitudeChange(std::string value);
 void OnTempOffsetChange(std::string value);
-void OnASCInitInterval(std::string value);
-void OnASCInterval(std::string value);
 void OnASCEnable(std::string value);
-void OnASCTarget(std::string value);
 
-int16_t StartPeriodicMeasurement(enum measurement_type type);
-void PrintError(int16_t error, char *reason = nullptr);
+void PrintError(int16_t error, const char *reason = nullptr);
 
 // *** globals *** //
 
@@ -37,7 +25,6 @@ static uint16_t g_persistentInterval;
 static uint16_t g_persistentFRC;
 static char errorMessage[128];
 static int16_t error;
-static enum measurement_type measurementType = high_performance;
 static int measurementIntervalMs = 5000;
 static int64_t lastMeasurementTimeMs = 0;
 
@@ -45,7 +32,7 @@ NimBLELibraryWrapper lib;
 SCD4xDataProvider provider(lib, DataType::T_RH_CO2);
 SensirionI2cScd30 sensor;
 
-void PrintError(int16_t error, char *reason)
+void PrintError(int16_t error, const char *reason)
 {
   if (reason)
   {
@@ -58,24 +45,6 @@ void PrintError(int16_t error, char *reason)
   Serial.println(errorMessage);
 }
 
-int16_t StartPeriodicMeasurement(enum measurement_type type)
-{
-  int16_t error;
-  switch (type)
-  {
-  case low_power:
-    error = sensor.startLowPowerPeriodicMeasurement();
-    break;
-  case high_performance:
-    error = sensor.startPeriodicMeasurement();
-    break;
-  default:
-    error = 1;
-    break;
-  }
-  return error;
-}
-
 void getPersistentData(void)
 {
   sensor.getTemperatureOffset(g_persistentTempOffsetTicks);
@@ -83,6 +52,7 @@ void getPersistentData(void)
   sensor.getAutoCalibrationStatus(g_persistentSelfCalEnable);
   sensor.getForceRecalibrationStatus(g_persistentFRC);
   sensor.getMeasurementInterval(g_persistentInterval);
+  measurementIntervalMs = g_persistentInterval * 1000;
 }
 
 void printPersistentData(void)
@@ -146,22 +116,16 @@ void setup()
   provider.enableAltitudeCharacteristic(OnAltitudeChange);
   provider.enableForcedRecalibrationCharacteristic(OnForcedRecalibration);
   provider.enableASCCharacteristic(OnASCEnable);
-  provider.enableASCTargetCharacteristic(OnASCTarget);
-  provider.enableASCInitIntervalCharacteristic(OnASCInitInterval);
-  provider.enableASCIntervalCharacteristic(OnASCInterval);
   provider.begin();
-  provider.setASCInitInterval(g_persistentAutoCalInitPeriod);
-  provider.setASCInterval(g_persistentAutoCalStandardPeriod);
   provider.setTempOffset(g_persistentTempOffsetTicks);
   provider.setASCStatus(g_persistentSelfCalEnable);
-  provider.setASCTarget(g_persistentSelfCalTarget);
   provider.setMeasurementInterval(measurementIntervalMs);
   provider.setAltitude(g_persistentAltitude);
 
   Serial.print("Sensirion GadgetBle Lib initialized with deviceId = ");
   Serial.println(provider.getDeviceIdString());
 
-  error = StartPeriodicMeasurement(measurementType);
+  error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
     PrintError(error, "StartPeriodicMeasurement");
@@ -171,18 +135,18 @@ void setup()
 
 void loop()
 {
-  static uint16_t co2Concentration = 0.0;
+  static float co2Concentration = 0.0;
   static float temperature = 0.0;
   static float humidity = 0.0;
-  bool dataReadyFlag = 0;
+  uint16_t dataReadyFlag = 0;
   uint32_t nextDelay = 0;
   if (millis() - lastMeasurementTimeMs >= measurementIntervalMs)
   {
-    sensor.getDataReadyStatus(dataReadyFlag);
+    sensor.getDataReady(dataReadyFlag);
     if (dataReadyFlag)
     {
-      error = sensor.readMeasurement(co2Concentration, temperature,
-                                     humidity);
+      error = sensor.readMeasurementData(co2Concentration, temperature,
+                                         humidity);
       if (error)
       {
         PrintError(error, "readMeasurementData");
@@ -245,14 +209,16 @@ void OnForcedRecalibration(std::string value)
     PrintError(error);
   }
   delay(500);
-  error = sensor.performForcedRecalibration(referenceCO2Level, correctionValue);
+  error = sensor.forceRecalibration(referenceCO2Level);
   if (error)
   {
     PrintError(error);
   }
-  Serial.print("Returned correction value: ");
-  Serial.println(correctionValue);
-  StartPeriodicMeasurement(measurementType);
+  error = sensor.startPeriodicMeasurement(0);
+  if (error)
+  {
+    PrintError(error);
+  }
 }
 
 void OnIntervalChange(std::string value)
@@ -263,34 +229,29 @@ void OnIntervalChange(std::string value)
   uint16_t interval = value[0] | (value[1] << 8);
   Serial.print("Interval requested with value: ");
   Serial.println(interval);
-  if (interval <= 5000)
+  if (interval < 2000)
   {
-    Serial.println("Enabling high performance mode with 5s sampling period");
-    measurementIntervalMs = 5000;
-    // g_persistentAutoCalInitPeriod = 48;
-    // g_persistentAutoCalStandardPeriod = 168;
-    measurementType = high_performance;
+    interval = 2000;
   }
-  else
-  {
-    Serial.println("Enabling low power mode with 30s sampling period");
-    measurementIntervalMs = 30000;
-    // g_persistentAutoCalInitPeriod = 8;
-    // g_persistentAutoCalStandardPeriod = 28;
-    measurementType = low_power;
-  }
-  // Serial.println("Stopping Measurements");
-  // error = sensor.stopPeriodicMeasurement();
-  // if (error) {PrintError(error);}
-  // Serial.println("Writing new ASC Values");
-  // sensor.setAutomaticSelfCalibrationInitialPeriod(g_persistentAutoCalInitPeriod);
-  // sensor.setAutomaticSelfCalibrationStandardPeriod(g_persistentAutoCalStandardPeriod);
   Serial.println("Restarting periodic measurements");
-  // provider.sendASCInitInterval(g_persistentAutoCalInitPeriod);
-  // provider.sendASCInterval(g_persistentAutoCalStandardPeriod);
+  error = sensor.stopPeriodicMeasurement();
+  if (error)
+  {
+    PrintError(error);
+  }
+  g_persistentInterval = interval / 1000;
+  measurementIntervalMs = g_persistentInterval * 1000;
   provider.setMeasurementInterval(measurementIntervalMs);
-  // sensor.persistSettings();
-  StartPeriodicMeasurement(measurementType);
+  error = sensor.setMeasurementInterval(g_persistentInterval);
+  if (error)
+  {
+    PrintError(error);
+  }
+  error = sensor.startPeriodicMeasurement(0);
+  if (error)
+  {
+    PrintError(error);
+  }
 }
 
 void OnAltitudeChange(std::string value)
@@ -306,18 +267,17 @@ void OnAltitudeChange(std::string value)
     PrintError(error);
   }
   Serial.println("Writing new altitude data");
-  error = sensor.setSensorAltitude(altitude);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
+  error = sensor.setAltitudeCompensation(altitude);
   if (error)
   {
     PrintError(error);
   }
   provider.setAltitude(altitude);
-  StartPeriodicMeasurement(measurementType);
+  error = sensor.startPeriodicMeasurement(0);
+  if (error)
+  {
+    PrintError(error);
+  }
 }
 
 void OnTempOffsetChange(std::string value)
@@ -333,99 +293,17 @@ void OnTempOffsetChange(std::string value)
     PrintError(error);
   }
   Serial.println("Writing new temperature Offset");
-  error = sensor.setTemperatureOffsetRaw(tempoffset);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
+  error = sensor.setTemperatureOffset(tempoffset);
   if (error)
   {
     PrintError(error);
   }
   provider.setTempOffset(tempoffset);
-  StartPeriodicMeasurement(measurementType);
-}
-
-void OnASCInitInterval(std::string value)
-{
-  // using nRF Connect write characterisic as UINT32 (litle endian)
-  uint16_t tempoffset = value[0] | (value[1] << 8);
-  Serial.print("ASC Init Interval requested with value: ");
-  Serial.println(tempoffset);
-  Serial.println("Stopping Measurements");
-  error = sensor.stopPeriodicMeasurement();
+  error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
     PrintError(error);
   }
-  Serial.println("Writing new ASC Initial Interval");
-  error = sensor.setAutomaticSelfCalibrationInitialPeriod(tempoffset);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
-  if (error)
-  {
-    PrintError(error);
-  }
-  provider.setASCInitInterval(tempoffset);
-  StartPeriodicMeasurement(measurementType);
-}
-
-void OnASCInterval(std::string value)
-{
-  // using nRF Connect write characterisic as UINT32 (litle endian)
-  uint16_t tempoffset = value[0] | (value[1] << 8);
-  Serial.print("ASC Interval requested with value: ");
-  Serial.println(tempoffset);
-  Serial.println("Stopping Measurements");
-  error = sensor.stopPeriodicMeasurement();
-  if (error)
-  {
-    PrintError(error);
-  }
-  Serial.println("Writing new ASC Interval");
-  error = sensor.setAutomaticSelfCalibrationStandardPeriod(tempoffset);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
-  if (error)
-  {
-    PrintError(error);
-  }
-  provider.setASCInterval(tempoffset);
-  StartPeriodicMeasurement(measurementType);
-}
-
-void OnASCTarget(std::string value)
-{
-  // using nRF Connect write characterisic as UINT32 (litle endian)
-  uint16_t tempoffset = value[0] | (value[1] << 8);
-  Serial.print("New ASC target: ");
-  Serial.println(tempoffset);
-  Serial.println("Stopping Measurements");
-  error = sensor.stopPeriodicMeasurement();
-  if (error)
-  {
-    PrintError(error);
-  }
-  Serial.println("Set ASC with target ppm");
-  error = sensor.setAutomaticSelfCalibrationTarget(tempoffset);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
-  if (error)
-  {
-    PrintError(error);
-  }
-  provider.setASCTarget(tempoffset);
-  StartPeriodicMeasurement(measurementType);
 }
 
 void OnASCEnable(std::string value)
@@ -445,16 +323,15 @@ void OnASCEnable(std::string value)
     PrintError(error);
   }
   Serial.println("Set ASC");
-  error = sensor.setAutomaticSelfCalibrationEnabled(tempoffset);
-  if (error)
-  {
-    PrintError(error);
-  }
-  error = sensor.persistSettings();
+  error = sensor.activateAutoCalibration(tempoffset);
   if (error)
   {
     PrintError(error);
   }
   provider.setASCStatus(tempoffset);
-  StartPeriodicMeasurement(measurementType);
+  error = sensor.startPeriodicMeasurement(0);
+  if (error)
+  {
+    PrintError(error);
+  }
 }
