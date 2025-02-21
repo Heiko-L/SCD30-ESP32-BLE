@@ -2,7 +2,7 @@
 #include "sdkconfig.h"
 #include "esp_pm.h"
 #include "Sensirion_Gadget_BLE.h"
-#include <SensirionI2cScd4x.h>
+#include <SensirionI2cScd30.h>
 #include <string>
 
 // *** declarations *** //
@@ -33,10 +33,8 @@ void PrintError(int16_t error, char *reason = nullptr);
 static uint16_t g_persistentTempOffsetTicks;
 static uint16_t g_persistentAltitude;
 static uint16_t g_persistentSelfCalEnable;
-static uint16_t g_persistentSelfCalTarget;
-static uint16_t g_persistentAutoCalInitPeriod;
-static uint16_t g_persistentAutoCalStandardPeriod;
-static uint64_t g_persistentSerial;
+static uint16_t g_persistentInterval;
+static uint16_t g_persistentFRC;
 static char errorMessage[128];
 static int16_t error;
 static enum measurement_type measurementType = high_performance;
@@ -45,7 +43,7 @@ static int64_t lastMeasurementTimeMs = 0;
 
 NimBLELibraryWrapper lib;
 SCD4xDataProvider provider(lib, DataType::T_RH_CO2);
-SensirionI2cScd4x sensor;
+SensirionI2cScd30 sensor;
 
 void PrintError(int16_t error, char *reason)
 {
@@ -80,21 +78,18 @@ int16_t StartPeriodicMeasurement(enum measurement_type type)
 
 void getPersistentData(void)
 {
-  sensor.getTemperatureOffsetRaw(g_persistentTempOffsetTicks);
-  sensor.getSensorAltitude(g_persistentAltitude);
-  sensor.getAutomaticSelfCalibrationTarget(g_persistentSelfCalTarget);
-  sensor.getAutomaticSelfCalibrationEnabled(g_persistentSelfCalEnable);
-  sensor.getAutomaticSelfCalibrationInitialPeriod(g_persistentAutoCalInitPeriod);
-  sensor.getAutomaticSelfCalibrationStandardPeriod(g_persistentAutoCalStandardPeriod);
-  sensor.getSerialNumber(g_persistentSerial);
+  sensor.getTemperatureOffset(g_persistentTempOffsetTicks);
+  sensor.getAltitudeCompensation(g_persistentAltitude);
+  sensor.getAutoCalibrationStatus(g_persistentSelfCalEnable);
+  sensor.getForceRecalibrationStatus(g_persistentFRC);
+  sensor.getMeasurementInterval(g_persistentInterval);
 }
 
 void printPersistentData(void)
 {
-  Serial.print("Sensirion SCD4x ID: 0x");
-  Serial.println(g_persistentSerial, HEX);
+  Serial.println("Sensirion SCD31 stored data:");
   Serial.print("Temperature Offset: ");
-  Serial.print(g_persistentTempOffsetTicks * 175.0 / 65536.0);
+  Serial.print(g_persistentTempOffsetTicks * 100.0);
   Serial.print("°C (");
   Serial.print(g_persistentTempOffsetTicks);
   Serial.println(" Ticks)");
@@ -104,19 +99,18 @@ void printPersistentData(void)
   Serial.print("Automatic Self Calibration: ");
   if (g_persistentSelfCalEnable)
   {
-    Serial.print(g_persistentSelfCalTarget);
-    Serial.println("ppm");
+    Serial.println("on");
   }
   else
   {
     Serial.println("off");
   }
-  Serial.print("Initial Period of ASC: ");
-  Serial.print(g_persistentAutoCalInitPeriod);
-  Serial.println("h");
-  Serial.print("Standard Period of ASC: ");
-  Serial.print(g_persistentAutoCalStandardPeriod);
-  Serial.println("h");
+  Serial.print("Forced Recalibration Value: ");
+  Serial.print(g_persistentFRC);
+  Serial.println(" ppm");
+  Serial.print("Measurement Interval: ");
+  Serial.print(g_persistentInterval);
+  Serial.println(" s");
 }
 
 void setup()
