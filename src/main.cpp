@@ -29,7 +29,7 @@ static int measurementIntervalMs = 5000;
 static int64_t lastMeasurementTimeMs = 0;
 
 NimBLELibraryWrapper lib;
-SCD4xDataProvider provider(lib, DataType::T_RH_CO2);
+SCDDataProvider provider(lib, DataType::T_RH_CO2);
 SensirionI2cScd30 sensor;
 
 void PrintError(int16_t error, const char *reason)
@@ -105,7 +105,7 @@ void setup()
   Serial.println("Hallo!");
   // Initialize the SCD driver
   Wire.begin();
-  sensor.begin(Wire, 0x62);
+  sensor.begin(Wire, 0x61);
   sensor.stopPeriodicMeasurement();
   getPersistentData();
   printPersistentData();
@@ -125,6 +125,7 @@ void setup()
   Serial.print("Sensirion GadgetBle Lib initialized with deviceId = ");
   Serial.println(provider.getDeviceIdString());
 
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
@@ -214,6 +215,7 @@ void OnForcedRecalibration(std::string value)
   {
     PrintError(error);
   }
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
@@ -247,6 +249,7 @@ void OnIntervalChange(std::string value)
   {
     PrintError(error);
   }
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
@@ -273,6 +276,7 @@ void OnAltitudeChange(std::string value)
     PrintError(error);
   }
   provider.setAltitude(altitude);
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
@@ -299,6 +303,7 @@ void OnTempOffsetChange(std::string value)
     PrintError(error);
   }
   provider.setTempOffset(tempoffset);
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
@@ -329,6 +334,7 @@ void OnASCEnable(std::string value)
     PrintError(error);
   }
   provider.setASCStatus(tempoffset);
+  lastMeasurementTimeMs = millis();
   error = sensor.startPeriodicMeasurement(0);
   if (error)
   {
